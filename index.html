@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnam Trip Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PDF Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- Leaflet Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .fade-in { animation: fadeIn 0.4s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Sidebar active state */
+        .tab-btn.active { background-color: #e0f2fe; color: #0284c7; border-right: 4px solid #0284c7; }
+        .tab-btn { transition: all 0.2s; border-right: 4px solid transparent; }
+        
+        /* Map fix */
+        #map { z-index: 0; }
+        
+        /* Hide scrollbar for clean look in sidebar */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+    
+    <!-- Polyfill for process.env (Must be before modules) -->
+    <script>
+        if (typeof process === "undefined") {
+            window.process = { env: {} };
+        }
+    </script>
+
+    <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
+    "react": "https://esm.sh/react@^19.2.4",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "recharts": "https://esm.sh/recharts@^3.7.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-teal-900 text-white shadow-lg z-30 flex-shrink-0">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <i data-lucide="map-pin" class="w-6 h-6 text-teal-400"></i>
+                <h1 class="text-xl font-bold tracking-tight">Vietnam Explorer</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="text-sm text-teal-200 hidden sm:block">
+                    Smart Itinerary Planner
+                </div>
+                <!-- API Key Button (Visible if AI Studio is detected) -->
+                <button id="apiKeyBtn" class="hidden text-xs bg-teal-800 hover:bg-teal-700 px-3 py-1 rounded text-teal-100 border border-teal-700 transition-colors flex items-center gap-2">
+                    <i data-lucide="key" class="w-3 h-3"></i>
+                    API Key
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="w-64 bg-white border-r border-slate-200 flex-col flex-shrink-0 hidden md:flex z-20 shadow-sm">
+            
+            <!-- Controls Summary -->
+            <div class="p-6 border-b border-slate-100">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Trip Settings</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">Departure</label>
+                        <input type="date" id="departureDate" class="w-full text-sm border-slate-300 rounded-md focus:ring-teal-500 focus:border-teal-500 bg-slate-50 p-2 border">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">Class</label>
+                        <select id="flightClass" class="w-full text-sm border-slate-300 rounded-md focus:ring-teal-500 focus:border-teal-500 bg-slate-50 p-2 border">
+                            <option value="Economy">Economy</option>
+                            <option value="Premium Economy">Premium Economy</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">Hotel Tier</label>
+                        <select id="hotelTier" class="w-full text-sm border-slate-300 rounded-md focus:ring-teal-500 focus:border-teal-500 bg-slate-50 p-2 border">
+                            <option value="Budget (3-star)">Budget (3★)</option>
+                            <option value="Comfort (4-star)" selected>Comfort (4★)</option>
+                            <option value="Luxury (5-star)">Luxury (5★)</option>
+                        </select>
+                    </div>
+                    <button id="generateBtn" class="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold py-2 px-4 rounded shadow-sm transition-colors flex items-center justify-center gap-2">
+                        <span>Plan Trip</span>
+                        <i data-lucide="sparkles" class="w-3 h-3"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <nav class="flex-1 overflow-y-auto py-4 space-y-1" id="sidebarTabs">
+                <button onclick="switchTab('itinerary')" class="tab-btn active w-full text-left px-6 py-3 flex items-center gap-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <i data-lucide="calendar" class="w-4 h-4"></i>
+                    Itinerary
+                </button>
+                <button onclick="switchTab('map')" class="tab-btn w-full text-left px-6 py-3 flex items-center gap-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <i data-lucide="map" class="w-4 h-4"></i>
+                    Map Route
+                </button>
+                <button onclick="switchTab('flights')" class="tab-btn w-full text-left px-6 py-3 flex items-center gap-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <i data-lucide="plane" class="w-4 h-4"></i>
+                    Flights & Transport
+                </button>
+                <button onclick="switchTab('costs')" class="tab-btn w-full text-left px-6 py-3 flex items-center gap-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <i data-lucide="pie-chart" class="w-4 h-4"></i>
+                    Cost Analysis
+                </button>
+                <button onclick="switchTab('weather')" class="tab-btn w-full text-left px-6 py-3 flex items-center gap-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <i data-lucide="cloud-sun" class="w-4 h-4"></i>
+                    Weather
+                </button>
+                <button onclick="switchTab('tips')" class="tab-btn w-full text-left px-6 py-3 flex items-center gap-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <i data-lucide="lightbulb" class="w-4 h-4"></i>
+                    Travel Advice
+                </button>
+            </nav>
+
+            <!-- PDF Button -->
+            <div class="p-4 border-t border-slate-200 bg-slate-50">
+                <button id="pdfBtn" onclick="generatePDF()" class="w-full border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-sm font-semibold py-2 px-4 rounded shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    <i data-lucide="file-down" class="w-4 h-4"></i>
+                    Download PDF
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto bg-slate-50 relative p-4 sm:p-8" id="mainScroll">
+            
+            <!-- Mobile Controls Toggle (Visible only on small screens) -->
+            <div class="md:hidden mb-6 bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                <div class="text-center text-sm text-slate-500 mb-2">Use sidebar on desktop for full controls</div>
+                <button id="mobileGenBtn" class="w-full bg-teal-600 text-white py-2 rounded font-medium">Generate Trip</button>
+            </div>
+
+            <!-- Welcome / Empty State -->
+            <div id="emptyState" class="flex flex-col items-center justify-center h-full text-center text-slate-400 p-8 min-h-[50vh]">
+                <div class="bg-white p-6 rounded-full shadow-sm mb-4">
+                    <i data-lucide="compass" class="w-12 h-12 text-teal-200"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-slate-700 mb-2">Ready to explore Vietnam?</h3>
+                <p class="max-w-md">Configure your trip settings on the left and click "Plan Trip" to generate a personalized AI itinerary.</p>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loadingState" class="hidden flex flex-col items-center justify-center h-full text-center p-8 min-h-[50vh]">
+                <div class="w-16 h-16 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin mb-6"></div>
+                <h3 class="text-lg font-semibold text-slate-700">Curating your experience...</h3>
+                <p class="text-slate-500 mt-2">Checking flight prices, weather, and finding the best spots.</p>
+            </div>
+
+            <!-- Content Tabs -->
+            <div id="results" class="hidden max-w-4xl mx-auto pb-20">
+                
+                <!-- Tab: Itinerary -->
+                <div id="tab-itinerary" class="tab-content fade-in space-y-6">
+                    <div class="flex justify-between items-end">
+                        <h2 class="text-2xl font-bold text-slate-800">10-Day Itinerary</h2>
+                        <span class="text-sm text-slate-500 bg-white px-3 py-1 rounded-full border shadow-sm">Vietnam</span>
+                    </div>
+                    <div id="itineraryContainer" class="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-300 before:to-transparent">
+                        <!-- Itinerary items injected here -->
+                    </div>
+                    
+                    <!-- Sources -->
+                    <div id="groundingContainer" class="hidden mt-8 pt-8 border-t border-slate-200">
+                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                            <i data-lucide="link" class="w-3 h-3"></i> Sources & References
+                        </h4>
+                        <div id="groundingLinks" class="flex flex-wrap gap-2"></div>
+                    </div>
+                </div>
+
+                <!-- Tab: Map -->
+                <div id="tab-map" class="tab-content hidden fade-in h-full">
+                    <h2 class="text-2xl font-bold text-slate-800 mb-6">Route Visualization</h2>
+                    <div class="bg-white p-1 rounded-xl shadow-md border border-slate-200 h-[600px]">
+                        <div id="map" class="w-full h-full rounded-lg bg-slate-100"></div>
+                    </div>
+                    <p class="mt-4 text-sm text-slate-500 text-center">Interactive map showing your 10-day journey across Vietnam.</p>
+                </div>
+
+                <!-- Tab: Flights -->
+                <div id="tab-flights" class="tab-content hidden fade-in space-y-6">
+                    <h2 class="text-2xl font-bold text-slate-800">Flights & Transportation</h2>
+                    
+                    <div class="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+                        <div class="bg-slate-50 px-6 py-4 border-b border-slate-200">
+                            <h3 class="font-bold text-slate-700 flex items-center gap-2">
+                                <i data-lucide="plane-takeoff" class="w-5 h-5 text-teal-600"></i>
+                                Flight Options (CFE ⇄ Vietnam)
+                            </h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-100">
+                                    <tr>
+                                        <th class="px-6 py-3">Airline</th>
+                                        <th class="px-6 py-3">Route</th>
+                                        <th class="px-6 py-3">Duration</th>
+                                        <th class="px-6 py-3 text-right">Economy</th>
+                                        <th class="px-6 py-3 text-right">Prem. Eco</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="flightList" class="divide-y divide-slate-100">
+                                    <!-- Flights injected here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="bg-blue-50 rounded-xl p-6 border border-blue-100 shadow-sm">
+                        <h3 class="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                            <i data-lucide="info" class="w-5 h-5"></i>
+                            Local Transportation Advice
+                        </h3>
+                        <p id="transportAdvice" class="text-blue-800 text-sm leading-relaxed"></p>
+                    </div>
+                </div>
+
+                <!-- Tab: Costs -->
+                <div id="tab-costs" class="tab-content hidden fade-in space-y-6">
+                    <h2 class="text-2xl font-bold text-slate-800">Cost Analysis</h2>
+                    
+                    <div class="bg-white rounded-xl shadow-md border border-slate-200 p-8">
+                        <div class="grid md:grid-cols-2 gap-8 items-center">
+                            <div class="relative h-64 w-full">
+                                <canvas id="costChart"></canvas>
+                            </div>
+                            <div class="space-y-6">
+                                <div>
+                                    <span class="text-sm text-slate-500 uppercase tracking-wider font-semibold">Total Estimated Cost</span>
+                                    <div class="text-4xl font-bold text-teal-700 mt-1" id="totalCost">€0</div>
+                                    <p class="text-xs text-slate-400 mt-2">Per person, based on selected preferences.</p>
+                                </div>
+                                <div class="bg-slate-50 p-4 rounded-lg text-sm text-slate-600 space-y-2 border border-slate-100">
+                                    <div class="flex justify-between"><span>Hotels:</span> <span font-medium text-slate-800 id="costHotel"></span></div>
+                                    <div class="flex justify-between"><span>Flights:</span> <span font-medium text-slate-800 id="costFlight"></span></div>
+                                    <div class="flex justify-between"><span>Activities:</span> <span font-medium text-slate-800 id="costActivity"></span></div>
+                                    <div class="flex justify-between border-t border-slate-200 pt-2 mt-2 font-medium"><span>Daily Expense:</span> <span id="costDaily"></span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab: Weather -->
+                <div id="tab-weather" class="tab-content hidden fade-in space-y-6">
+                    <h2 class="text-2xl font-bold text-slate-800">Weather Forecast</h2>
+                    <div class="bg-white rounded-xl shadow-md border border-slate-200 p-8 text-center">
+                        <div class="inline-flex items-center justify-center p-4 bg-teal-50 rounded-full mb-4">
+                            <i data-lucide="cloud-sun" class="w-10 h-10 text-teal-600"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-4" id="weatherTitle">General Conditions</h3>
+                        <p class="text-slate-600 leading-relaxed max-w-2xl mx-auto" id="weatherContent">
+                            Loading weather information...
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Tab: Travel Tips -->
+                <div id="tab-tips" class="tab-content hidden fade-in space-y-6">
+                    <h2 class="text-2xl font-bold text-slate-800">Essential Travel Advice</h2>
+                    <div id="tipsContainer" class="grid md:grid-cols-2 gap-6">
+                        <!-- Tips injected here -->
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Hidden Printable Container -->
+    <div id="printableArea" class="hidden">
+        <div class="p-8 bg-white text-slate-800 font-sans">
+            <h1 class="text-3xl font-bold text-teal-800 mb-2">Vietnam Trip Itinerary</h1>
+            <div class="text-sm text-slate-500 mb-8 border-b pb-4">Generated by Vietnam Explorer AI</div>
+            
+            <div id="printItineraryContent" class="space-y-6"></div>
+            
+            <div class="mt-8 pt-8 border-t border-slate-200 grid grid-cols-2 gap-8">
+                <div>
+                    <h3 class="font-bold mb-2">Flight Summary</h3>
+                    <div id="printFlightContent" class="text-sm text-slate-600"></div>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-2">Cost Estimate</h3>
+                    <div id="printCostContent" class="text-sm text-slate-600"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script type="module">
+        import { GoogleGenAI, Type } from "@google/genai";
+
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Global State
+        let map = null;
+        let chartInstance = null;
+        let currentTripData = null;
+
+        // --- DOM Elements ---
+        const generateBtn = document.getElementById('generateBtn');
+        const mobileGenBtn = document.getElementById('mobileGenBtn');
+        const pdfBtn = document.getElementById('pdfBtn');
+        const apiKeyBtn = document.getElementById('apiKeyBtn');
+        const emptyState = document.getElementById('emptyState');
+        const loadingState = document.getElementById('loadingState');
+        const resultsDiv = document.getElementById('results');
+        
+        // --- Initialization ---
+        // Set default date to 1 month from now
+        const dateInput = document.getElementById('departureDate');
+        const today = new Date();
+        today.setMonth(today.getMonth() + 1);
+        dateInput.valueAsDate = today;
+
+        // Check for AI Studio environment
+        if (window.aistudio) {
+            apiKeyBtn.classList.remove('hidden');
+            apiKeyBtn.onclick = () => window.aistudio.openSelectKey();
+        }
+
+        // --- Event Listeners ---
+        generateBtn.addEventListener('click', () => generateTrip());
+        mobileGenBtn.addEventListener('click', () => generateTrip());
+
+        // --- Tab Switching Logic ---
+        window.switchTab = (tabName) => {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            const btns = document.querySelectorAll('.tab-btn');
+            const tabMap = { 'itinerary': 0, 'map': 1, 'flights': 2, 'costs': 3, 'weather': 4, 'tips': 5 };
+            if (btns[tabMap[tabName]]) btns[tabMap[tabName]].classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.add('hidden'));
+            const target = document.getElementById(`tab-${tabName}`);
+            if(target) target.classList.remove('hidden');
+            if (tabName === 'map' && map) { setTimeout(() => { map.invalidateSize(); }, 100); }
+        }
+
+        // --- PDF Generation Logic ---
+        window.generatePDF = () => {
+            if (!currentTripData) return;
+            const element = document.getElementById('printableArea');
+            const itinHTML = document.getElementById('itineraryContainer').innerHTML;
+            document.getElementById('printItineraryContent').innerHTML = itinHTML;
+            const flight = currentTripData.flights[0];
+            document.getElementById('printFlightContent').innerHTML = flight 
+                ? `<p>${flight.airline} (${flight.route})</p><p>Duration: ${flight.duration}</p><p>Est. Price: €${flight.priceEconomy}</p>` 
+                : 'No flight data';
+            document.getElementById('printCostContent').innerHTML = `<p class="text-xl font-bold">Total: €${currentTripData.costs.total}</p>`;
+            element.classList.remove('hidden');
+            const opt = { margin: [10, 10], filename: 'Vietnam_Itinerary.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+            html2pdf().set(opt).from(element).save().then(() => { element.classList.add('hidden'); });
+        };
+
+        // --- Main Logic: Generate Trip ---
+        async function generateTrip(retryCount = 0) {
+            const date = document.getElementById('departureDate').value;
+            const flightClass = document.getElementById('flightClass').value;
+            const hotelTier = document.getElementById('hotelTier').value;
+
+            if (!date) return alert("Please select a date");
+
+            // UI Transitions
+            emptyState.classList.add('hidden');
+            resultsDiv.classList.add('hidden');
+            loadingState.classList.remove('hidden');
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<i class="animate-spin w-4 h-4" data-lucide="loader-2"></i> Planning...';
+            lucide.createIcons();
+
+            try {
+                // Handle API Key Selection
+                if (window.aistudio) {
+                    const hasKey = await window.aistudio.hasSelectedApiKey();
+                    if (!hasKey) {
+                        await window.aistudio.openSelectKey();
+                    }
+                }
+
+                // Get API Key
+                const apiKey = process.env.API_KEY;
+                if (!apiKey) {
+                    throw new Error("API Key is missing. Please select an API key using the 'API Key' button in the top right, or ensure your environment provides process.env.API_KEY.");
+                }
+
+                const ai = new GoogleGenAI({ apiKey: apiKey });
+                const modelId = "gemini-3-flash-preview";
+                
+                const prompt = `
+                    Plan a 10-day trip to Vietnam starting from Clermont-Ferrand (CFE) on ${date}.
+                    Preferences: Class: ${flightClass}, Hotel: ${hotelTier}, Duration: 10 days.
+                    Reqs: 3 beach days, cultural visits, Lat/Lng for map.
+                    Tasks: 3 flight options (prices/estimates), Cost breakdown (EUR), Weather info, Travel tips.
+                    
+                    Output JSON:
+                    {
+                      "flights": [{ "airline": "...", "route": "...", "priceEconomy": 0, "pricePremium": 0, "duration": "..." }],
+                      "transportAdvice": "...",
+                      "costs": { "flight": 0, "hotel": 0, "transport": 0, "activities": 0, "daily": 0, "total": 0 },
+                      "itinerary": [{ "day": 1, "location": "...", "lat": 10.0, "lng": 105.0, "title": "...", "desc": "...", "activities": ["..."], "stay": "..." }],
+                      "weatherInfo": "...",
+                      "travelTips": [{ "category": "...", "tip": "..." }]
+                    }
+                `;
+
+                const response = await ai.models.generateContent({
+                    model: modelId,
+                    contents: prompt,
+                    config: {
+                        tools: [{ googleSearch: {} }],
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.OBJECT,
+                            properties: {
+                                flights: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { airline: { type: Type.STRING }, route: { type: Type.STRING }, priceEconomy: { type: Type.NUMBER }, pricePremium: { type: Type.NUMBER }, duration: { type: Type.STRING } } } },
+                                transportAdvice: { type: Type.STRING },
+                                weatherInfo: { type: Type.STRING },
+                                travelTips: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { category: { type: Type.STRING }, tip: { type: Type.STRING } } } },
+                                costs: { type: Type.OBJECT, properties: { flight: { type: Type.NUMBER }, hotel: { type: Type.NUMBER }, transport: { type: Type.NUMBER }, activities: { type: Type.NUMBER }, daily: { type: Type.NUMBER }, total: { type: Type.NUMBER } } },
+                                itinerary: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { day: { type: Type.INTEGER }, location: { type: Type.STRING }, lat: { type: Type.NUMBER }, lng: { type: Type.NUMBER }, title: { type: Type.STRING }, desc: { type: Type.STRING }, activities: { type: Type.ARRAY, items: { type: Type.STRING } }, stay: { type: Type.STRING } } } }
+                            }
+                        }
+                    }
+                });
+
+                if (!response.text) throw new Error("AI response was empty.");
+                const data = JSON.parse(response.text);
+                currentTripData = data;
+
+                // Grounding
+                const links = [];
+                const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+                if (chunks) { chunks.forEach(c => { if (c.web?.uri && c.web?.title) links.push(c.web); }); }
+
+                renderResults(data, links);
+                pdfBtn.disabled = false;
+                switchTab('itinerary');
+
+            } catch (err) {
+                console.error(err);
+                const msg = err instanceof Error ? err.message : "Unknown error";
+                
+                // Retry logic for "Requested entity was not found"
+                if (msg.includes("Requested entity was not found") && retryCount === 0 && window.aistudio) {
+                    console.warn("API Key entity not found. Retrying selection...");
+                    await window.aistudio.openSelectKey();
+                    // Recursive retry once
+                    return generateTrip(1);
+                }
+
+                alert(`Failed to plan trip: ${msg}`);
+            } finally {
+                loadingState.classList.add('hidden');
+                generateBtn.disabled = false;
+                generateBtn.innerHTML = '<span>Plan Trip</span><i class="w-3 h-3" data-lucide="sparkles"></i>';
+                lucide.createIcons();
+            }
+        }
+
+        // --- Render Logic (Same as before) ---
+        function renderResults(data, links) {
+            resultsDiv.classList.remove('hidden');
+            const itinContainer = document.getElementById('itineraryContainer');
+            itinContainer.innerHTML = data.itinerary.map((day, idx) => `
+                <div class="relative z-10">
+                    <div class="md:flex items-center justify-between space-x-0 md:space-x-8">
+                        <div class="md:w-5/12 ${idx % 2 === 0 ? 'md:order-1' : 'md:order-2'}">
+                             <div class="bg-white border ${idx % 2 === 0 ? 'border-teal-200' : 'border-slate-200'} shadow-md rounded-xl p-5 hover:shadow-lg transition-shadow">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-xs font-bold uppercase tracking-wider text-teal-600">Day ${day.day}</span>
+                                    <span class="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-1 rounded">${day.location}</span>
+                                </div>
+                                <h4 class="font-bold text-slate-800 mb-2">${day.title}</h4>
+                                <p class="text-sm text-slate-600 mb-4 line-clamp-3">${day.desc}</p>
+                                <div class="text-xs text-slate-500 space-y-1">
+                                    <div class="flex items-start gap-1">
+                                        <i data-lucide="check-circle" class="w-3 h-3 mt-0.5 text-teal-500"></i>
+                                        <span>${day.activities.join(', ')}</span>
+                                    </div>
+                                    <div class="flex items-center gap-1 text-indigo-600 font-medium pt-2">
+                                        <i data-lucide="moon" class="w-3 h-3"></i>
+                                        <span>${day.stay}</span>
+                                    </div>
+                                </div>
+                             </div>
+                        </div>
+                        <div class="hidden md:flex md:w-2/12 justify-center ${idx % 2 === 0 ? 'md:order-2' : 'md:order-1'}">
+                            <div class="w-8 h-8 bg-teal-500 rounded-full flex items-center justify-center shadow-lg border-4 border-white">
+                                <span class="text-white font-bold text-xs">${day.day}</span>
+                            </div>
+                        </div>
+                        <div class="md:w-5/12 ${idx % 2 === 0 ? 'md:order-3' : 'md:order-0'}"></div>
+                    </div>
+                </div>
+            `).join('');
+
+            const flightContainer = document.getElementById('flightList');
+            document.getElementById('transportAdvice').textContent = data.transportAdvice;
+            
+            if (data.flights && data.flights.length > 0) {
+                flightContainer.innerHTML = data.flights.map(f => `
+                    <tr class="bg-white hover:bg-slate-50 transition-colors">
+                        <td class="px-6 py-4 font-medium text-slate-900">${f.airline}</td>
+                        <td class="px-6 py-4 text-slate-500 text-xs">${f.route}</td>
+                        <td class="px-6 py-4 text-slate-500">${f.duration}</td>
+                        <td class="px-6 py-4 text-right font-semibold text-teal-700">€${f.priceEconomy || 'N/A'}</td>
+                        <td class="px-6 py-4 text-right font-semibold text-amber-600">€${f.pricePremium || 'N/A'}</td>
+                    </tr>
+                `).join('');
+            } else {
+                flightContainer.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-slate-500 italic">No specific flight data found.</td></tr>';
+            }
+
+            document.getElementById('totalCost').textContent = '€' + data.costs.total;
+            document.getElementById('costHotel').textContent = '€' + data.costs.hotel;
+            document.getElementById('costFlight').textContent = '€' + data.costs.flight;
+            document.getElementById('costActivity').textContent = '€' + data.costs.activities;
+            document.getElementById('costDaily').textContent = '€' + data.costs.daily;
+
+            const ctx = document.getElementById('costChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Flight', 'Hotel', 'Transport', 'Activities', 'Daily'],
+                    datasets: [{
+                        data: [data.costs.flight, data.costs.hotel, data.costs.transport, data.costs.activities, data.costs.daily],
+                        backgroundColor: ['#0d9488', '#f59e0b', '#3b82f6', '#ec4899', '#6366f1'],
+                        borderWidth: 0
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'bottom' } } }
+            });
+
+            initMap(data.itinerary);
+            document.getElementById('weatherTitle').textContent = `Weather for your trip`;
+            document.getElementById('weatherContent').textContent = data.weatherInfo || "Weather information unavailable.";
+
+            const tipsContainer = document.getElementById('tipsContainer');
+            if (data.travelTips && data.travelTips.length > 0) {
+                tipsContainer.innerHTML = data.travelTips.map(t => `
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                        <div class="flex items-center gap-3 mb-2">
+                            <div class="p-2 bg-teal-50 rounded-lg">
+                                <i data-lucide="info" class="w-4 h-4 text-teal-600"></i>
+                            </div>
+                            <h4 class="font-bold text-slate-800">${t.category}</h4>
+                        </div>
+                        <p class="text-sm text-slate-600 leading-relaxed">${t.tip}</p>
+                    </div>
+                `).join('');
+            } else {
+                tipsContainer.innerHTML = '<p class="text-slate-500 text-center col-span-2">No specific tips loaded.</p>';
+            }
+
+            const linksDiv = document.getElementById('groundingLinks');
+            const gContainer = document.getElementById('groundingContainer');
+            if (links && links.length > 0) {
+                gContainer.classList.remove('hidden');
+                linksDiv.innerHTML = links.map(l => `
+                    <a href="${l.uri}" target="_blank" class="flex items-center gap-1 text-xs bg-white border border-slate-200 px-3 py-1.5 rounded-full text-slate-600 hover:text-teal-600 hover:border-teal-300 transition-colors">
+                        <i data-lucide="external-link" class="w-3 h-3"></i>
+                        ${l.title}
+                    </a>
+                `).join('');
+            } else {
+                gContainer.classList.add('hidden');
+            }
+            lucide.createIcons();
+        }
+
+        function initMap(itinerary) {
+            if (map) { map.remove(); map = null; }
+            if (!itinerary || itinerary.length === 0) return;
+            map = L.map('map');
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+            const latLngs = [];
+            itinerary.forEach(day => {
+                if (day.lat && day.lng) {
+                    const point = [day.lat, day.lng];
+                    latLngs.push(point);
+                    L.marker(point).addTo(map).bindPopup(`<b>Day ${day.day}</b><br>${day.location}`);
+                }
+            });
+            if (latLngs.length > 0) {
+                const polyline = L.polyline(latLngs, {color: '#0d9488', weight: 4, opacity: 0.7}).addTo(map);
+                map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+            } else {
+                map.setView([14.0583, 108.2772], 5);
+            }
+        }
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
